@@ -9,7 +9,7 @@ This software is intended to work on Ingrid/Manneback
 
 Modules you will need to load
 ```
-module load root/6.12.04-sl7_gcc73 boost/1.66.0_sl7_gcc73 gcc/gcc-7.3.0-sl7_amd64 python/python36_sl7_gcc73  cmake/cmake-3.9.6 lhapdf/6.1.6-sl7_gcc73 gcc/gcc-7.3.0-sl7_amd64 slurm/slurm_utils 
+module load root/6.12.04-sl7_gcc73 python/python36_sl7_gcc73  slurm/slurm_utils 
 
 ```
 
