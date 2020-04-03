@@ -1,0 +1,25 @@
+# Machine learning for ZA analysis
+
+## Codes description 
+- ZAMachineLearning.py : base code, the one used for (almost) everything
+- concatenate_csv.py : to concatenate csv files from several hyperparameter scans to do the reporting
+- data_generator.py : inherited class from Keras to produce batches in a generator type training
+- generateLwtnnNetwork.py : to go from python Keras DNN to LWTNN C++ DNN, can also be used to crop the preprocessing layer
+- generate_mask.py : in case of non generator learning, generates mask between test and train data
+- import_tree.py : from root files to Pandas dataframes, either in loop or file by file
+- KerasToTensorflowModel.py : from a keras to a tensorflow model
+- make_scaler.py : produce scaler for preprocessing, either in generator mode or not
+- Model.py : contains all the different Keras models that can be used
+- NeuralNet.py : does hyperparameter scans, reporting, restore and deployment of model
+- parameterize_classifier.py : classifier task parameterized 
+- parameters.py : user config script for all parameters
+- plot_scans.py : several plots for the reporting
+- preprocessing.py : contains the custom layer for the preprocessing
+- produce_output.py : from pandas dataframe to root_file
+- sampleList.py : list of all the samples to use in the training or evaluation
+- signal_coupling.py : for the signal pameterized network
+- split_training.py : to slice the full param dict into pkl files for each job
+- submit_on_slurm.py : function to submit all the jobs on slurm
+- threadGPU.py : when using the GPU, starts a thread to monitor its usage
+- Utils.py : few useful functions 
+

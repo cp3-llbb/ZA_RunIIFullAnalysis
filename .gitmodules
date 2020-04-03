@@ -1,0 +1,6 @@
+[submodule "MachineLearning/TalosGithub"]
+	path = MachineLearning/TalosGithub
+	url = git@github.com:FlorianBury/talos.git
+[submodule "ZAMachineLearning/TalosGithub"]
+	path = ZAMachineLearning/TalosGithub
+	url = git@github.com:FlorianBury/talos.git
