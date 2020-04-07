@@ -4,10 +4,14 @@ import glob
 import copy
 import argparse
 import shutil
+import yaml
+import json
+import pickle
 from operator import add
 import zipfile
 import pandas
 import pprint
+from sklearn import preprocessing
 
 ##################################################################################################
 ##########################                 GetEntries                   ##########################
@@ -282,30 +286,157 @@ def AppendTree(rootfile1,rootfile2,branches,event_filter=None,rename=None):
     print ('New file saved as %s'%rootfile1.replace('.root','_new.root'))
 
 ##################################################################################################
+##################           ExtractXsecAndEventWeightSumFromYaml              ###################
+##################################################################################################
+def ExtractXsecAndEventWeightSumFromYaml(yaml_path,suffix):
+    xsec_dict = {}
+    ews_dict = {}
+    # Load YAML file #
+    with open(yaml_path, 'r') as stream:
+        try:
+            data = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            print(exc)
+    # Save Xsec and event weight sum in dict #
+    files  = data["files"]
+    for sample, dico in files.items():
+        if dico["type"] != 'data':
+            xsec_dict[sample] = dico["cross-section"]
+            ews_dict[sample] = dico["generated-events"]
+
+    with open("%s_xsec.json"%suffix, "w") as handle:
+        json.dump(xsec_dict,handle,indent=4)
+
+    with open("%s_event_weight_sum.json"%suffix, "w") as handle:
+        json.dump(ews_dict,handle,indent=4)
+
+    print ("Generated file %s_xsec.json"%suffix)
+    print ("Generated file %s_event_weight_sum.json"%suffix)
+
+##################################################################################################
+#####################           RemovePreprocessingLayer             #############################
+##################################################################################################
+def RemovePreprocessingLayer(json_file,h5_file,suffix):
+    # Remove Preprocess layer from json file #
+    print ("Modifying the json file content %s"%json_file)
+    with open(json_file, 'r') as f:
+        arch = json.load(f)
+    preprocess_layer = arch['config']['layers'][1]
+    mean = preprocess_layer['config']['mean']
+    std = preprocess_layer['config']['std']
+    del arch['config']['layers'][1]
+    arch['config']['layers'][1]['inbound_nodes'][0][0][0] = arch['config']['input_layers'][0][0]
+
+    with open("%s%s"%(suffix,json_file), 'w') as f:
+        json.dump(arch,f)
+    print ("New architecture saved in %s%s"%(suffix,json_file))
+    pprint.pprint(arch)
+
+    # Save scaler #
+    scaler = preprocessing.StandardScaler()
+    scaler.mean_ = mean
+    scaler.std_= std
+    with open("%sscaler.pkl"%suffix, 'wb') as handle:
+        pickle.dump(scaler, handle)
+
+    # Remove Preprocess layer from h5 file #
+    print ("Modifying the h5 file content %s"%h5_file)
+    f = h5py.File(h5_file, 'r')
+    new_f = h5py.File("%s%s"%(suffix,h5_file), 'w')
+
+    for key, value in f.attrs.items(): # Needs to copy h5 attributes
+        if isinstance(value,np.ndarray): # Need to exclude the preprocess name from list of layers
+            new_value = np.ndarray(shape=(value.shape[0]-1,),dtype=value.dtype)
+            j = 0
+            for i in range(value.shape[0]):
+                if b'Preprocess' not in value[i]:
+                    new_value[j] = value[i]
+                    j += 1
+            new_f.attrs[key] = new_value
+        else:
+            new_f.attrs[key] = value
+
+    for layer, group in f.items():     # Loop on groups and their names 'layer)
+        print ("Layer {}".format(layer))
+        # Check if preprocess layer #
+        if 'Preprocess' in layer:
+            print ('  Skipped')
+            continue
+        # Empty layers (dropout, ...)
+        if (len(list(group.keys())) == 0): # Does not contain subgroups of datasets
+            new_g = new_f.create_group(layer)
+            for key, value in group.attrs.items():
+                new_g.attrs.create(key,value)
+            print ("  Empty group, has been copied")
+        # Non-Empty layers (dense, ...)
+        else: # Does contain something
+            new_g = new_f.create_group(layer)       # Create first level group
+            for key, value in group.attrs.items():  # Copy attributes of group
+                new_g.attrs.create(key,value) 
+            for subname, subgroup in group.items(): # Loop through subgroups
+                print ("  Contains subgroup ",subname)
+                print ("  Group {}/{} has been added".format(layer,subname))
+                new_subg = new_f.create_group("{}/{}".format(layer,subname)) # Create subgroup
+                for dataset_name in subgroup.keys():    # Loop through datasets in the given layer and add them to new file
+                    print ("    Added dataset {}/{}/{} to group".format(layer,subname,dataset_name))
+                    new_f.create_dataset("{}/{}/{}".format(layer,subname,dataset_name),data=subgroup.get(dataset_name)[:])
+                    
+    f.close()
+    new_f.close()
+    print ("New h5 file saved as %s%s"%(suffix,h5_file))
+
+##################################################################################################
 ##########################                 Main                         ##########################
 ##################################################################################################
 
 if __name__=='__main__':
-    parser = argparse.ArgumentParser('Several useful tools in the context of MoMEMtaNeuralNet')
+
+    #----- Argparse -----#
+    parser = argparse.ArgumentParser('Several useful tools in the context of MoMEMtaNeuralNet',conflict_handler='resolve')
 
     countArgs = parser.add_argument_group('Count tree events in multiple root files')
-    countArgs.add_argument('--path', action='store', required=False, help='Path for the count')
-    countArgs.add_argument('--input', action='append', nargs='+', required=False, help='List of strings that must be contained in the filename')
-    countArgs.add_argument('--cut', action='store', default='', type=str, required=False, help='Cuts to be applied')
-    countArgs.add_argument('--tree', action='store', default='tree', type=str, required=False, help='Name of the tree (default="tree")')
+    countArgs.add_argument('--path', action='store', required=False, 
+        help='Path for the count')
+    countArgs.add_argument('--input', action='append', nargs='+', required=False, 
+        help='List of strings that must be contained in the filename')
+    countArgs.add_argument('--cut', action='store', default='', type=str, required=False, 
+        help='Cuts to be applied')
+    countArgs.add_argument('--tree', action='store', default='tree', type=str, required=False, 
+        help='Name of the tree (default="tree")')
 
     zipArgs = parser.add_argument_group('Concatenate zip files (also modifying names of files inside the archive')
-    zipArgs.add_argument('--zip', action='append', nargs=2, required=False, help='path to input .zip + path to output .zip')
+    zipArgs.add_argument('--zip', action='append', nargs=2, required=False, 
+        help='path to input .zip + path to output .zip')
 
     CountVar = parser.add_argument_group('Counts the sum of variables in all files')
-    CountVar.add_argument('--variable', action='store', required=False, type=str, help='Partial name of the branches to include in the count (--path must have been provided)')
-    CountVar.add_argument('--list', action='store', required=False, type=str, help='Lists all the branches of a given file')
+    CountVar.add_argument('--variable', action='store', required=False, type=str, 
+        help='Partial name of the branches to include in the count (--path must have been provided)')
+    CountVar.add_argument('--list', action='store', required=False, type=str, 
+        help='Lists all the branches of a given file')
 
-    appendArgs = parser.add_argument_group('')
-    appendArgs.add_argument('--append', action='append', nargs='+', required=False, help='Name of first root file + Name of second root file + list of branches to be taken from second and appended to first')
-    appendArgs.add_argument('--append_filter', action='append', nargs='+', required=False, help='List of branches that must be used in the filter to append files')
-    appendArgs.add_argument('--append_rename', action='append', nargs='+', required=False, help='List of names that should replace the appended column names (must have the same number of entries)')
+    appendArgs = parser.add_argument_group('Concatenate branches of one root file to the other')
+    appendArgs.add_argument('--append', action='append', nargs='+', required=False, 
+        help='Name of first root file + Name of second root file + list of branches to be taken from second and appended to first')
+    appendArgs.add_argument('--append_filter', action='append', nargs='+', required=False, 
+        help='List of branches that must be used in the filter to append files')
+    appendArgs.add_argument('--append_rename', action='append', nargs='+', required=False, 
+        help='List of names that should replace the appended column names (must have the same number of entries)')
 
+    yamlExtract = parser.add_argument_group('Parse a YAML file produced by bamboo to extract Xsec and event weight sum')
+    yamlExtract.add_argument("--yaml", action='store', type=str, required=False, 
+        help='Name of the YAML file used by plotIt containign Xsec and event weight sum')
+    yamlExtract.add_argument("--suffix", action='store', type=str, required=False, default='',
+        help='Will produce {suffix}_xsec.json and {suffix}_event_weight_sum.json (default = "")')
+
+    removePreProcess = parser.add_argument_group('Remove Preprocess layer from a model in json (architecture) and h5 files (weights)')
+    removePreProcess.add_argument("--json", action='store', type=str, required=False,
+        help='Name of the json file containing the network architecture')
+    removePreProcess.add_argument("--h5", action='store', type=str, required=False,
+        help='Name of the h5 file containing the network weights')
+    removePreProcess.add_argument("--suffix", action='store', type=str, required=False, default='',
+        help='Suffix to be added in from of the new files ({suffix}file.json, {suffix}file.h5 and {suffix}scaler.pkl which contains the extracted preprocessing parameters)')
+
+    #----- Execution -----#
     args = parser.parse_args()
     if args.path is not None:
         if args.input is not None:
@@ -355,4 +486,8 @@ if __name__=='__main__':
 
             AppendTree(file1,file2,branches,event_filter=filter_events,rename=list_names)
 
+    if args.yaml is not None:
+        ExtractXsecAndEventWeightSumFromYaml(args.yaml,args.suffix)
 
+    if args.json is not None and args.h5 is not None:
+        RemovePreprocessingLayer(args.json,args.h5,args.suffix)
