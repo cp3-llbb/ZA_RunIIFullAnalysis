@@ -19,13 +19,17 @@ from sklearn import preprocessing
 def GetEntries(f,cut='',treeName="tree"):
     """ Count the entries in a file, with or without a cut """
     from ROOT import TFile
-    file_handle = TFile.Open(f)                                                                                                                                                                
-    tree = file_handle.Get(treeName) 
-    if cut=='':
-        return tree.GetEntries()
+    file_handle = TFile.Open(f) 
+    if file_handle.GetListOfKeys().Contains(treeName):
+        tree = file_handle.Get(treeName) 
+        if cut=='':
+            return tree.GetEntries()
+        else:
+            player = tree.GetPlayer()
+            return [player.GetEntries(cut),tree.GetEntries()]
     else:
-        player = tree.GetPlayer()
-        return [player.GetEntries(cut),tree.GetEntries()]
+        print ("Could not open tree %s in file %s"%(treeName,f))
+        return 0
 
 ##################################################################################################
 ##########################                 ListEntries                  ##########################
@@ -36,9 +40,11 @@ def ListEntries(path,part=[''],cut='',treeName="tree"):
         N_tot = 0
     else:
         N_tot = [0,0]
-    for f in glob.glob(path+'/*'):
+    list_f = glob.glob(path+'/*')
+    list_f.sort()
+    for f in list_f:
         skip = False
-        filename = f.replace(path,'').replace('root','')
+        filename = os.path.basename(f)
         for p in part:
             if filename.find(p)==-1: # Could not find part of name
                 skip = True

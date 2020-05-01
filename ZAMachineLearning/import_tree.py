@@ -2,6 +2,7 @@ import glob
 import os
 import sys
 import logging
+import json
 import re
 import collections
 import copy
@@ -19,32 +20,40 @@ from ROOT import TChain, TFile, TTree
 # Tree2Pandas#
 ###############################################################################
 
-def Tree2Pandas(input_file, variables, weight=None, cut=None, reweight_to_cross_section=False, n=None, tree_name='tree',start=None):
+def Tree2Pandas(input_file, variables, weight=None, cut=None, xsec=None, event_weight_sum=None, n=None, tree_name='Events',start=None):
     """
     Convert a ROOT TTree to a numpy array.
     """
-    # Check for repetitions in variables -> makes root_numpy crash #
+    variables = [var for var in variables if not var.startswith("$")]
     variables = copy.copy(variables) # Otherwise will add the weight and have a duplicate branch
-    rep = [item for item, count in collections.Counter(variables).items() if count > 1]
-    if len(rep) != 0:
-        for r in rep:
-            logging.critical('The argument "%s" is repeated in the variables'%r)
-        sys.exit(1)
 
+    # Check for repetitions in variables -> makes root_numpy crash #
+    repeated_var = [item for item, count in collections.Counter(variables).items() if count > 1]
+    if len(repeated_var) != 0:
+        logging.critical('There are repeated variables')
+        for var in repeated_var:
+            logging.critical('... %s'%var)
+        raise RuntimeError("Repeated arguments for importing data")
+
+    # Get root tree, check if exists first #
+    if not os.path.exists(input_file):
+        logging.warning("File %s does not exist"%input_file)
+        return None
     file_handle = TFile.Open(input_file)
+    if not file_handle.GetListOfKeys().Contains(tree_name):
+        logging.warning("Could not find tree %s in %s"%(tree_name,input_file))
+        return None
     tree = file_handle.Get(tree_name)
     N = tree.GetEntries()
-    logging.debug('\t\tNumber of events : '+str(N))
+    logging.debug('... Number of events : '+str(N))
 
     relative_weight = 1
-    if reweight_to_cross_section:
-        cross_section = file_handle.Get('cross_section').GetVal()
-        event_weight_sum = file_handle.Get("event_weight_sum").GetVal()
-        relative_weight = cross_section / event_weight_sum
-        logging.debug('\t\tReweighting requested')
-        logging.debug('\t\t\tCross section : '+str(cross_section))
-        logging.debug('\t\t\tEvent weight sum : '+str(event_weight_sum))
-        logging.debug('\t\t\tRelative weight : '+str(relative_weight))
+    if xsec is not None and event_weight_sum is not None:
+        relative_weight = xsec / event_weight_sum
+        logging.debug('... Reweighting requested')
+        logging.debug('         Cross section : '+str(xsec))
+        logging.debug('         Event weight sum : '+str(event_weight_sum))
+        logging.debug('... Relative weight : '+str(relative_weight))
     # Read the tree and convert it to a numpy structured array
     if weight is not None:
         variables += [weight]
@@ -53,7 +62,8 @@ def Tree2Pandas(input_file, variables, weight=None, cut=None, reweight_to_cross_
     # Convert to pandas dataframe #
     df = pd.DataFrame(data)
     if weight is not None:
-        df[weight] *= relative_weight
+        df['event_weight'] = df[weight]*relative_weight
+
 
     # Only part of tree #
     if n:
@@ -73,64 +83,78 @@ def Tree2Pandas(input_file, variables, weight=None, cut=None, reweight_to_cross_
 # LoopOverTrees #
 ###############################################################################
 
-def LoopOverTrees(input_dir, variables, weight=None, tag=None, cut=None, reweight_to_cross_section=False, n=None, list_sample=None, start=None):
+def LoopOverTrees(input_dir, variables, weight=None, tag=None, cut=None, xsec_json=None, event_weight_sum_json=None, list_sample=None, start=None, n=None):
     """
     Loop over ROOT trees inside input_dir and process them using Tree2Pandas.
     """
     # Check if directory #
     if not os.path.isdir(input_dir):
-        logging.critical("LoopOverTrees : Not a directory")
-        sys.exit(1)
+        logging.critical("%s not a directory"%sinput_dir)
+        raise RuntimeError
 
     logging.debug("Accessing directory : "+input_dir)
 
-    # Add potential cut to the one in parameters.py file #
-    if cut is not None:
-        cut += " && "+parameters.cut
-    else:
-        cut : parameters.cut
+    # Xsec #
+    xsec = None
+    if xsec_json is not None:
+        with open(xsec_json,'r') as handle:
+            dict_xsec = json.load(handle)
+    # Event weight sum #
+    event_weight_sum = None
+    if event_weight_sum_json is not None:
+        with open(event_weight_sum_json,'r') as handle:
+            dict_event_weight_sum = json.load(handle)
 
     # Wether to use a given sample list or loop over files inside a dir #
     if list_sample is None:
         list_sample = glob.glob(os.path.join(input_dir,"*.root"))
     else:
-        list_sample = [input_dir + s for s in list_sample]
+        list_sample = [os.path.join(input_dir,s) for s in list_sample]
 
     # Loop over the files #
     first_file = True
     all_df = pd.DataFrame() 
-    for name in list_sample:
-        filename = name.replace(input_dir,'')
-        logging.debug("\tAccessing file : %s"%filename)
+    for sample in list_sample:
+        sample_name = os.path.basename(sample)
+        logging.debug("\tAccessing file : %s"%sample_name)
 
-        # If a tag for specific files has been requested # 
-        if tag is not None:
-            if re.search(tag,filename):
-                logging.debug('\t\t-> Matched sample')
-            else:
-                continue 
+        if xsec_json is not None:
+            for name,xs in dict_xsec.items():
+                if name in sample_name:
+                    xsec = xs
+        if event_weight_sum_json is not None:
+            for name,ews in dict_event_weight_sum.items():
+                if name in sample_name:
+                    event_weight_sum = ews
        
         # Get the data as pandas df #
-        df = Tree2Pandas(input_file                 = name,
+        df = Tree2Pandas(input_file                 = sample,
                          variables                  = variables,
                          weight                     = weight,
                          cut                        = cut,
-                         reweight_to_cross_section  = reweight_to_cross_section,
+                         xsec                       = xsec,
+                         event_weight_sum           = event_weight_sum,
                          n                          = n,
-                         tree_name                  = 'tree',
+                         tree_name                  = 'Events',
                          start                      = start) 
 
+        if df is None:
+            continue
+
         # Find mH, mA #
-        if filename.find('HToZA')!=-1: # Signal -> Search for mH and mA
-            mH = [int(re.findall(r'\d+', filename)[2])]*df.shape[0]    
-            mA = [int(re.findall(r'\d+', filename)[3])]*df.shape[0]    
+        if sample_name.find('HToZA')!=-1: # Signal -> Search for mH and mA
+            mH = [int(re.findall(r'\d+', sample_name)[2])]*df.shape[0]    
+            mA = [int(re.findall(r'\d+', sample_name)[3])]*df.shape[0]    
         else: # Background, set them at 0
             mH = [0]*df.shape[0]
             mA = [0]*df.shape[0]
 
         # Register in DF #
-        df['mH_gen'] = pd.Series(mH)
-        df['mA_gen'] = pd.Series(mA)
+        df['mH'] = pd.Series(mH)
+        df['mA'] = pd.Series(mA)
+
+        # Register sample name #
+        df['sample'] = pd.Series([sample_name.replace('.root','')]*df.shape[0])
         
         # Register the tag if provided #
         if tag is not None:

@@ -39,8 +39,6 @@ def submit_on_slurm(name,args,debug=False):
     if not output:
         config.inputParamsNames += ['scan','task']
 
-    print (config.inputParamsNames, config.inputParams)
-
     config.payload = """ """
 
     if GPU:
@@ -62,9 +60,9 @@ def submit_on_slurm(name,args,debug=False):
     slurm_config.inputSandboxDir = slurm_config.batchScriptsDir
     slurm_config.stageoutDir = os.path.join(slurm_working_dir, 'output')
     slurm_config.stageoutLogsDir = os.path.join(slurm_working_dir, 'logs')
-    slurm_config.stageoutFiles = ["*.csv","*.zip","*.png","*.root"]
+    slurm_config.stageoutFiles = ["*.csv","*.zip","*.png"]
 
-    slurm_config.payload = config.payload.format(script=out_dir+"/MoMEMtaNeuralNet.py")
+    slurm_config.payload = config.payload.format(script=os.path.join(out_dir,"ZAMachineLearning.py"))
 
     if not output:
         for f in glob.glob(os.path.join(parameters.main_path,'split',name,'*.pkl')):

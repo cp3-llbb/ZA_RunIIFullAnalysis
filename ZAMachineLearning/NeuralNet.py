@@ -37,8 +37,6 @@ from talos.model.normalizers import lr_normalizer
 from talos.utils.gpu_utils import parallel_gpu_jobs
 import talos
 
-import astetik as ast # For the plot section
-
 import matplotlib.pyplot as plt
 
 # Personal files #
@@ -163,7 +161,7 @@ class HyperModel:
                                       x_val = self.x_val,       # Evaluation inouts
                                       y_val = self.y_val[:,:-1],# Evaluatio targets (last column is weight)
                                       n = -1,                   # How many model to evaluate (n=-1 means all)
-                                      folds = 5, c              # Cross-validation splits for nominal and errors
+                                      folds = 5,                # Cross-validation splits for nominal and errors
                                       metric = 'val_loss',      # On what metric to sort
                                       asc = True,               # Ascending because loss function
                                       shuffle = True,           # Shuffle bfore evaluation
@@ -179,7 +177,6 @@ class HyperModel:
                 model_eval = model_from_json(self.h.saved_models[i],custom_objects=self.custom_objects)   
                 model_eval.set_weights(self.h.saved_weights[i])
                 model_eval.compile(optimizer=Adam(),loss={'OUT':parameters.p['loss_function']},metrics=['accuracy'])
-                #model_eval.compile(optimizer=Adam(),loss={'OUT':mean_squared_error},metrics=['accuracy'])
                 # Evaluate model #
                 evaluation_generator = DataGenerator(path = parameters.path_gen_evaluation,
                                                      inputs = parameters.inputs,
@@ -228,9 +225,9 @@ class HyperModel:
             logging.warning('You asked for the evaluation error but it was not computed, will switch to val_loss') 
             best = 'val_loss'
         if best == 'eval_error':
-            Deploy(self.h,model_name=self.name_model,metric='eval_mean',asc=True,path_model=path_model)
+            Deploy(self.h,model_name=self.name_model,metric='eval_mean',asc=False,path_model=path_model)
         elif best == 'val_loss':
-            Deploy(self.h,model_name=self.name_model,metric='val_loss',asc=True,path_model=path_model)
+            Deploy(self.h,model_name=self.name_model,metric='val_loss',asc=False,path_model=path_model)
             logging.warning('Best model saved according to val_loss')
         else: 
             logging.error('Argument of HyperDeploy not understood')
@@ -275,9 +272,9 @@ class HyperModel:
         logging.info('='*80)
         logging.info('Best parameters sets')
         if eval_criterion == 'eval_error':
-            sorted_data = r.data.sort_values('eval_mean',ascending=True)
+            sorted_data = r.data.sort_values('eval_mean',ascending=False)
         elif eval_criterion == 'val_loss':
-            sorted_data = r.data.sort_values('val_loss',ascending=True)
+            sorted_data = r.data.sort_values('val_loss',ascending=False)
 
         for i in range(0,10):
             logging.info('-'*80)
@@ -331,7 +328,7 @@ class HyperModel:
         Reference :
             /home/ucl/cp3/fbury/.local/lib/python3.6/site-packages/talos/commands/restore.py
         """
-        logging.info((' Starting restoration of with model %s.zip '%(self.name).center(80,'-'))
+        logging.info((' Starting restoration of with model %s.zip '%(self.name).center(80,'-')))
         # Load the preprocessing layer #
         # Restore model #
         loaded = False
