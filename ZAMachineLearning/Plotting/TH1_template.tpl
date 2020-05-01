@@ -1,5 +1,4 @@
 TH1_template:
-  filename: (leave empty)  
   tree: tree_name
   variable: Expression
   weight: weight_branch

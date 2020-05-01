@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 # ROOT STYLE #
-import CMS_lumi
 import tdrstyle
 
 # FORMULAS #
@@ -45,7 +44,8 @@ plt.rc('figure', titlesize=BIGGER_SIZE) # fontsize of the figure title
 
 #####################################     Plot_TH1      #########################################
 class Plot_TH1:
-    def __init__(self,filename,tree,variable,weight,cut,name,bins,xmin,xmax,title,xlabel,ylabel,logx=False,logy=False):
+    def __init__(self,filepath,filename,tree,variable,cut,name,bins,xmin,xmax,title,xlabel,ylabel,weight=None,logx=False,logy=False,option='hist'):
+        self.filepath = filepath
         self.filename = filename
         self.tree = tree
         self.variable = variable
@@ -60,15 +60,25 @@ class Plot_TH1:
         self.ylabel = ylabel
         self.logx = logx
         self.logy = logy
+        self.option = option
 
     def MakeHisto(self):
-        file_handle = TFile.Open(self.filename)
+        file_handle = TFile.Open(self.filepath)
         tree = file_handle.Get(self.tree)
-        tree.Draw(self.variable+'>>'+self.name+'('+str(self.bins)+','+str(self.xmin)+','+str(self.xmax)+')',self.cut,"goff")    
+        if not tree:
+            logging.error("Could not open tree '%s' from file '%s'"%(self.tree,self.filename))
+        if self.weight and self.weight != '':
+            tree.Draw(self.variable+'>>'+self.name+'('+str(self.bins)+','+str(self.xmin)+','+str(self.xmax)+')',self.weight+'*('+self.cut+')',"goff")    
+        else:
+            tree.Draw(self.variable+'>>'+self.name+'('+str(self.bins)+','+str(self.xmin)+','+str(self.xmax)+')',self.cut,"goff")    
         histo = gROOT.FindObject(self.name)
-        histo.SetTitle(self.title+';'+self.xlabel+';'+self.ylabel)
+        histo.SetTitle(self.title+' (%s sample)'%self.filename+';'+self.xlabel+';'+self.ylabel+' / %0.2f'%(histo.GetBinWidth(1)))
         self.histo = copy.deepcopy(histo)
         file_handle.Close()
+        # Overflow #
+        self.histo.SetBinContent(1,self.histo.GetBinContent(0)+self.histo.GetBinContent(1))
+        self.histo.SetBinContent(self.histo.GetNbinsX(),self.histo.GetBinContent(self.histo.GetNbinsX())+self.histo.GetBinContent(self.histo.GetNbinsX()+1))
+
 
     def PlotOnCanvas(self,pdf_name):
         tdrstyle.setTDRStyle() 
@@ -76,25 +86,24 @@ class Plot_TH1:
         self.histo.SetTitleOffset(1.6,'xyz')
         self.histo.SetMinimum(0)
         self.histo.SetLineWidth(2)
-        # Overflow #
-        self.histo.SetBinContent(1,self.histo.GetBinContent(0)+self.histo.GetBinContent(1))
-        self.histo.SetBinContent(self.histo.GetNbinsX(),self.histo.GetBinContent(self.histo.GetNbinsX())+self.histo.GetBinContent(self.histo.GetNbinsX()+1))
-
+        self.histo.SetTitle(self.title)
         if self.logx:
             canvas.SetLogx()
         if self.logy:
             canvas.SetLogy()
+            self.histo.SetMinimum(1)
 
-        self.histo.Draw()
+        self.histo.Draw(self.option)
 
-        canvas.Print(pdf_name,'Title:'+self.title)
+        canvas.Print(pdf_name,'Title:' + self.title + " (sample : %s)"%self.filename)
         canvas.Close()
 
 
 
 ####################################      Plot_TH2       ########################################
 class Plot_TH2:
-    def __init__(self,filename,tree,variablex,variabley,weight,cut,name,binsx,binsy,xmin,xmax,ymin,ymax,title,xlabel,ylabel,zlabel='',option='colz',normalizeX=False,normalizeY=False,logx=False,logy=False,logz=False):
+    def __init__(self,filepath,filename,tree,variablex,variabley,cut,name,binsx,binsy,xmin,xmax,ymin,ymax,title,xlabel,ylabel,weight=None,zlabel='',option='colz',normalizeX=False,normalizeY=False,logx=False,logy=False,logz=False):
+        self.filepath = filepath
         self.filename = filename
         self.tree = tree
         self.variablex = variablex
@@ -122,7 +131,12 @@ class Plot_TH2:
     def MakeHisto(self):
         file_handle = TFile.Open(self.filename)
         tree = file_handle.Get(self.tree)
-        tree.Draw(self.variabley+':'+self.variablex+'>>'+self.name+'('+str(self.binsx)+','+str(self.xmin)+','+str(self.xmax)+','+str(self.binsy)+','+str(self.ymin)+','+str(self.ymax)+')',self.cut,"goff "+self.option)    
+        if not tree:
+            logging.error("Could not open tree '%s' from file '%s'"%(self.tree,self.filename))
+        if self.weight and self.weight != '':
+            tree.Draw(self.variabley+':'+self.variablex+'>>'+self.name+'('+str(self.binsx)+','+str(self.xmin)+','+str(self.xmax)+','+str(self.binsy)+','+str(self.ymin)+','+str(self.ymax)+')',self.weight+'*('+self.cut+')',"goff "+self.option)    
+        else:
+            tree.Draw(self.variabley+':'+self.variablex+'>>'+self.name+'('+str(self.binsx)+','+str(self.xmin)+','+str(self.xmax)+','+str(self.binsy)+','+str(self.ymin)+','+str(self.ymax)+')',self.cut,"goff "+self.option)    
         self.histo = copy.deepcopy(gROOT.FindObject(self.name))
         if self.normalizeX:
             for x in range(0,self.histo.GetNbinsX()+1):
@@ -170,7 +184,8 @@ class Plot_TH2:
 
 ####################################    Plot_Ratio_TH1    ########################################
 class Plot_Ratio_TH1:
-    def __init__(self,filename,tree,variable1,variable2,weight,cut,name,bins,xmin,xmax,title,xlabel,ylabel,legend1,legend2,logx=False,logy=False):
+    def __init__(self,filepath,filename,tree,variable1,variable2,cut,name,bins,xmin,xmax,title,xlabel,ylabel,legend1,legend2,weight=None,logx=False,logy=False,option='hist'):
+        self.filepath = filepath
         self.filename = filename
         self.tree = tree
         self.variable1 = variable1
@@ -188,10 +203,11 @@ class Plot_Ratio_TH1:
         self.legend2 = legend2
         self.logx = logx
         self.logy = logy
+        self.option = option
 
     def MakeHisto(self):
-        instance1 = Plot_TH1(self.filename,self.tree,self.variable1,self.weight,self.cut,self.name,self.bins,self.xmin,self.xmax,self.title,self.xlabel,self.ylabel)
-        instance2 = Plot_TH1(self.filename,self.tree,self.variable2,self.weight,self.cut,self.name,self.bins,self.xmin,self.xmax,self.title,self.xlabel,self.ylabel)
+        instance1 = Plot_TH1(self.filepath,self.filename,self.tree,self.variable1,self.weight,self.cut,self.name,self.bins,self.xmin,self.xmax,self.title,self.xlabel,self.ylabel)
+        instance2 = Plot_TH1(self.filepath,self.filename,self.tree,self.variable2,self.weight,self.cut,self.name,self.bins,self.xmin,self.xmax,self.title,self.xlabel,self.ylabel)
         instance1.MakeHisto()
         instance2.MakeHisto()
 
@@ -214,8 +230,8 @@ class Plot_Ratio_TH1:
         pad1.Draw()
         pad1.cd()
         self.histo1.SetStats(0)
-        self.histo1.Draw()
-        self.histo2.Draw("same")
+        self.histo1.Draw(self.option)
+        self.histo2.Draw(self.option+" same")
 
         if self.logx:
             pad1.SetLogx()
@@ -291,7 +307,8 @@ class Plot_Ratio_TH1:
 
 ####################################    Plot_Multi_TH1    #######################################
 class Plot_Multi_TH1:
-    def __init__(self,filename,tree,list_variable,weight,list_cut,list_legend,list_color,name,bins,xmin,xmax,title,xlabel,ylabel,logx=False,logy=False,legend_pos=[0.5,0.5,0.9,0.85]):
+    def __init__(self,filepath,filename,tree,list_variable,weight,list_cut,list_legend,list_color,name,bins,xmin,xmax,title,xlabel,ylabel,option='hist',logx=False,logy=False,legend_pos=[0.5,0.5,0.9,0.85]):
+        self.filepath = filepath
         self.filename = filename
         self.tree = tree
         self.weight = weight
@@ -305,6 +322,7 @@ class Plot_Multi_TH1:
         self.legend_pos = legend_pos
         self.logx = logx
         self.logy = logy
+        self.option = option
 
         if len(list_variable) == 1 and len(list_cut) > 1:
             logging.debug('\tOnly one variable but several cuts')
@@ -337,7 +355,8 @@ class Plot_Multi_TH1:
     def MakeHisto(self):
         self.list_obj = []
         for i in range(0,len(self.list_variable)):
-            instance = Plot_TH1(filename = self.filename,
+            instance = Plot_TH1(filepath = self.filepath,
+                                filename = self.filename,
                                 tree     = self.tree,
                                 variable = self.list_variable[i],
                                 weight   = self.weight,
@@ -377,15 +396,16 @@ class Plot_Multi_TH1:
             obj.SetMaximum(maxY)
             obj.SetTitleOffset(1.8,'x')
             obj.SetTitleOffset(2,'y')
-            obj.Draw("same")
+            obj.Draw(self.option+" same")
             
         if self.logx:
             c1.SetLogx()
         if self.logy:
             c1.SetLogy()
+            self.list_obj[0].SetMinimum(10)
 
         legend.Draw()
-        c1.Print(pdf_name,'Title:'+self.title+' Same')
+        c1.Print(pdf_name,'Title:'+self.list_obj[0].GetTitle()+' Same')
         c1.Close()
             
         # Plot the stacked histograms #
@@ -407,7 +427,7 @@ class Plot_Multi_TH1:
             obj.SetTitleOffset(2,'y')
             obj.Draw()
 
-        self.stack_hist.Draw("same")
+        self.stack_hist.Draw(self.option+" same")
 
         if self.logx:
             c2.SetLogx()
@@ -416,17 +436,19 @@ class Plot_Multi_TH1:
 
         legend.Draw()
 
-        c2.Print(pdf_name,'Title:'+self.title+' Stack')
+        c2.Print(pdf_name,'Title:'+self.list_obj[0].GetTitle()+' Stack')
         c2.Close()
         
 ####################################      Plot_ROC       ########################################
 class Plot_ROC:
-    def __init__(self,tree,variable,weight,title,selector,cut=''):
+    def __init__(self,tree,variable,title,selector,xlabel,ylabel,weight=None,cut=''):
         self.tree = tree                                # Name of the tree to be taken from root file
         self.variable = variable                        # Discriminative variable (typically between 0 and 1)
-        self.weight = weight                            # Weight to be used in the ROC curve (not implemeted here)
+        self.weight_name = weight                       # Weight to be used in the ROC curve 
         self.cut = cut                                  # Potential cut before applying the ROC
         self.title = title                              # Title of the ROC (to be included in legend !)
+        self.xlabel = xlabel                            # TItle of x axis
+        self.ylabel = ylabel                            # Title of y axis
         self.selector = selector                        # Dict to give the target (=value) as a function of string inside filename (=key)
         self.output = np.empty((0,1))                   # Will contain the outputs (aka the variable from files)
         self.target = np.empty((0,1))                   # Will contin the targets
@@ -440,21 +462,29 @@ class Plot_ROC:
                 valid_file = True
         if not valid_file: return False# If file not to be taken into account
         # recover output #
-        out = root2array(filename,self.tree,branches=self.variable,selection=self.cut)
+        if self.weight_name and self.weight_name!='':
+            out = root2array(filename,self.tree,branches=[self.variable+self.weight_name],selection=self.cut)
+        else:
+            out = root2array(filename,self.tree,branches=self.variable,selection=self.cut)
         try:
             out = rec2array(out) # If not a vector, need to remove dtype
         except:
             pass
-        if out.ndim==1: out = out.reshape(-1,1) # vector -> array
+        if out.ndim==1: 
+            out = out.reshape(-1,1) # vector -> array
+        if out.shape[1]>1: # contains [dicriminant,weight]
+            weight = out[:,1]
+            out = out[:,0]
         
         # Add to container #
         tar = np.ones((out.shape[0],1))*target
         self.output = np.concatenate((self.output,out),axis=0)
         self.target = np.concatenate((self.target,tar),axis=0)
+        self.weight = weight if self.weight_name and self.weight_name!='' else None
         return True
 
     def ProcessROC(self):
-        self.fpr, self.tpr, threshold = metrics.roc_curve(self.target,self.output)
+        self.fpr, self.tpr, threshold = metrics.roc_curve(self.target, self.output, sample_weight=self.weight)
         self.roc_auc = metrics.auc(self.fpr, self.tpr)
 
 
@@ -472,8 +502,8 @@ def MakeROCPlot(list_obj,name,title):
     plt.plot([0, 1], [0, 1],'k--')
     plt.xlim([0, 1])
     plt.ylim([0, 1])
-    plt.xlabel(r'Correct $t\bar{t}$ identification')
-    plt.ylabel(r'Misidentification of DY as $t\bar{t}$')
+    plt.xlabel("Signal efficiency")
+    plt.ylabel("Background efficiency")
     plt.suptitle(title)
 
     fig.savefig(name+'.png')
@@ -482,7 +512,7 @@ def MakeROCPlot(list_obj,name,title):
 
 #################################      Plot_Multi_ROC       #####################################
 class Plot_Multi_ROC:
-    def __init__(self,tree,classes,labels,prob_branches,colors,weight,title,selector,cut=''):
+    def __init__(self,tree,classes,labels,prob_branches,colors,title,selector,weight=None,cut=''):
         self.tree = tree                                # Name of the tree
         self.classes = classes                          # eg [0,1,2], just numbering
         self.labels = labels                            # Labels to display on plot
@@ -490,8 +520,9 @@ class Plot_Multi_ROC:
         self.selector = selector                        # Depending on string name, gives target
         self.prob_branches = prob_branches              # Branches containign the probabilities
         self.n_classes = len(classes)                   # number of classes
-        self.weight = weight                            # Weight (not used so far)
-        self.title = title                              # eg differentiate ROC from MEM and DNN
+        self.weight_name = weight                       # Weight name
+        self.weight = np.empty((0,1))                   # Weight vector 
+        self.title = title                              # title of plot
         self.prob_per_class = np.empty((0,self.n_classes))# output of network
         self.scores = np.empty((0,self.n_classes))      # Correct classes
         self.cut = cut                                  # Potential cut
@@ -511,8 +542,14 @@ class Plot_Multi_ROC:
         if not valid_file: return False# If file not to be taken into account
  
         # Get the output prob #
-        probs = rec2array(root2array(filename,self.tree,branches=self.prob_branches,selection=self.cut))
-        self.prob_per_class = np.concatenate((self.prob_per_class,probs),axis=0)
+        if self.weight_name and self.weight_name!='':
+            probs = rec2array(root2array(filename,self.tree,branches=self.prob_branches+[self.weight_name],selection=self.cut))
+            self.prob_per_class = np.concatenate((self.prob_per_class,probs[:,:-1]),axis=0)
+            self.weight = np.concatenate((self.weight,probs[:,-1].reshape(-1,1)),axis=0)
+        else:
+            probs = rec2array(root2array(filename,self.tree,branches=self.prob_branches,selection=self.cut))
+            self.prob_per_class = np.concatenate((self.prob_per_class,probs),axis=0)
+            self.weight = None
 
         # Make the targets labelized #
         target_arr = self.lb.transform([target]*probs.shape[0])
@@ -528,8 +565,13 @@ class Plot_Multi_ROC:
         self.roc_auc = {}
         # Process class by class #
         for i,n in enumerate(self.lb.classes_):
-            self.fpr[n], self.tpr[n], _ = metrics.roc_curve(self.scores[:, i], self.prob_per_class[:, i])
-            self.roc_auc[n] = metrics.auc(self.fpr[n], self.tpr[n]) 
+            self.fpr[n], self.tpr[n], _ = metrics.roc_curve(self.scores[:, i], self.prob_per_class[:, i], sample_weight=self.weight)
+            try:
+                self.roc_auc[n] = metrics.auc(self.fpr[n], self.tpr[n]) 
+            except ValueError: # Due to weights the fpr might not be increasing due float errors, tries to sort it   
+                logging.warning("FPR not increasing for auc computation, might be weights ... will sort and try again")
+                fpr = np.sort(self.fpr[n])
+                self.roc_auc[n] = metrics.auc(fpr, self.tpr[n]) 
             
         ## Micro-average #
         #self.fpr["micro"], self.tpr["micro"], _ = metrics.roc_curve(self.scores.ravel(), self.prob_per_class.ravel())
@@ -549,7 +591,7 @@ class Plot_Multi_ROC:
         #self.tpr["macro"] = mean_tpr
         #self.roc_auc["macro"] = metrics.auc(self.fpr["macro"], self.tpr["macro"])
 
-def MakeMultiROCPlot(list_obj,name,title):
+def MakeMultiROCPlot(list_obj,name):
     # Generate figure #
     fig, ax = plt.subplots(1,figsize=(10,8))
     line_cycle = itertools.cycle(["-","--",":","-.",])
@@ -559,7 +601,8 @@ def MakeMultiROCPlot(list_obj,name,title):
         linestyle = next(line_cycle)
         for key,lab,col in zip(obj.tpr.keys(),obj.labels,obj.colors):
             # Label #
-            label = (obj.title+' '+lab)
+            #label = (obj.title+' '+lab)
+            label = lab
             label += ('\n AUC = %0.5f'%obj.roc_auc[key])
             # Plot #
             ax.plot(obj.tpr[key], obj.fpr[key], color=col, label=label, linestyle=linestyle)
@@ -572,7 +615,7 @@ def MakeMultiROCPlot(list_obj,name,title):
     plt.ylim([0, 1])
     plt.xlabel(r'Correct identification')
     plt.ylabel(r'Misidentification')
-    plt.suptitle(title)
+    plt.suptitle(list_obj[0].title)
 
     fig.savefig(name+'.png')#,bbox_inches='tight')
     logging.info('ROC curved saved as %s.png'%name)
@@ -607,9 +650,10 @@ class ProcessYAML():
         for name,conf in self.config.items(): # name is a string, conf is the dict of params
             # Loop over kwargs #
             for key,value in changes.items():
-                # Check that the changes keys are in the config keys
+                # Check if the changes keys are in the config keys
                 if not key in conf.keys():
-                    logging.warning('Overriden key "%s" not found'%key)
+                    logging.debug('Overriden key "%s" not found, will add it'%key)
+                    self.config[name][key] = value
                     continue
                 # If string, depends if empty or not
                 if isinstance(self.config[name][key],str):

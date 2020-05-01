@@ -1,5 +1,4 @@
-MEM_vs_DNN_weight_DY:
-  filename: (leave empty)
+logname:
   tree: tree_name
   variablex: ExpressionX
   variabley: ExpressionY

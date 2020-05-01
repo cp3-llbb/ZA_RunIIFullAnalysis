@@ -1,5 +1,4 @@
 TH1_ratio_template:
-  filename: (leave empty) 
   tree: tree_name
   variable1: Expression1
   variable2: Expression2

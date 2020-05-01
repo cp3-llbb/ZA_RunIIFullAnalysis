@@ -1,5 +1,4 @@
 TH1Multi_template:
-  filename: (leave empty)
   tree: tree_name
   weight: weight_branch
   name: hist_name
