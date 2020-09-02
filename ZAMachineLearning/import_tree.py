@@ -20,7 +20,7 @@ from ROOT import TChain, TFile, TTree
 # Tree2Pandas#
 ###############################################################################
 
-def Tree2Pandas(input_file, variables, weight=None, cut=None, xsec=None, event_weight_sum=None, n=None, tree_name='Events',start=None):
+def Tree2Pandas(input_file, variables, weight=None, cut=None, xsec=None, event_weight_sum=None, luminosity=None, n=None, tree_name='Events',start=None):
     """
     Convert a ROOT TTree to a numpy array.
     """
@@ -47,13 +47,17 @@ def Tree2Pandas(input_file, variables, weight=None, cut=None, xsec=None, event_w
     N = tree.GetEntries()
     logging.debug('... Number of events : '+str(N))
 
-    relative_weight = 1
+    relative_weight = 1 
     if xsec is not None and event_weight_sum is not None:
-        relative_weight = xsec / event_weight_sum
-        logging.debug('... Reweighting requested')
-        logging.debug('         Cross section : '+str(xsec))
-        logging.debug('         Event weight sum : '+str(event_weight_sum))
-        logging.debug('... Relative weight : '+str(relative_weight))
+        if luminosity is None:
+            luminosity = 1
+        relative_weight = xsec * luminosity / event_weight_sum
+        logging.debug('\t\tReweighting requested')
+        logging.debug('\t\t\tCross section : %0.5f'%xsec)
+        logging.debug('\t\t\tEvent weight sum : %0.2f'%event_weight_sum)
+        logging.debug('\t\t\tLuminosity : %0.2f'%luminosity)
+        logging.debug('\t\tRelative weight %0.3e'%relative_weight)
+
     # Read the tree and convert it to a numpy structured array
     if weight is not None:
         variables += [weight]
@@ -83,7 +87,7 @@ def Tree2Pandas(input_file, variables, weight=None, cut=None, xsec=None, event_w
 # LoopOverTrees #
 ###############################################################################
 
-def LoopOverTrees(input_dir, variables, weight=None, tag=None, cut=None, xsec_json=None, event_weight_sum_json=None, list_sample=None, start=None, n=None):
+def LoopOverTrees(input_dir, variables, weight=None, additional_columns={}, cut=None, xsec_json=None, event_weight_sum_json=None, luminosity=None, list_sample=None, start=None, n=None):
     """
     Loop over ROOT trees inside input_dir and process them using Tree2Pandas.
     """
@@ -134,6 +138,7 @@ def LoopOverTrees(input_dir, variables, weight=None, tag=None, cut=None, xsec_js
                          cut                        = cut,
                          xsec                       = xsec,
                          event_weight_sum           = event_weight_sum,
+                         luminosity                 = luminosity,
                          n                          = n,
                          tree_name                  = 'Events',
                          start                      = start) 
@@ -156,9 +161,10 @@ def LoopOverTrees(input_dir, variables, weight=None, tag=None, cut=None, xsec_js
         # Register sample name #
         df['sample'] = pd.Series([sample_name.replace('.root','')]*df.shape[0])
         
-        # Register the tag if provided #
-        if tag is not None:
-            df['tag'] = pd.Series([tag]*df.shape[0])
+        # Register additional columns #
+        if len(additional_columns.keys()) != 0:
+            for key,val in additional_columns.items():
+                df[key] = pd.Series([val]*df.shape[0])
 
         # Concatenate into full df #
         if first_file:

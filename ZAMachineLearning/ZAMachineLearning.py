@@ -239,63 +239,62 @@ def main():
     list_inputs  = parameters.inputs
     list_outputs = parameters.outputs
 
-    topologies = []
-    if opt.resolved:
-        topologies.append("resolved")
-    if opt.boosted:
-        topologies.append("boosted")
-    if len(topologies) == 0:
-        raise RuntimeError("No correct topology has been specified")
+    lumidict = {'2016':35922,'2017':41529.152060112,'2018':59740.565201546}
 
-
-    if not opt.generator:
+    if opt.nocache:
+        logging.warning('No cache will be used not saved')
+    if os.path.exists(parameters.train_cache) and os.path.exists(parameters.test_cache) and not opt.nocache:
+        logging.info('Will load data from cache')
+        train_all = pd.read_pickle(parameters.train_cache)
+        test_all = pd.read_pickle(parameters.test_cache)
+    else:
         # Import arrays #
-        logging.info('Background samples')
-        DY_list = []
-        TT_list  = []
-        ZA_list  = []
-        for topo in topologies:
-            DY_list.extend(samples_dict['%s_DY'%topo])
-            TT_list.extend(samples_dict['%s_TT'%topo])
-            ZA_list.extend(samples_dict['%s_ZA'%topo])
-            
-        data_DY = LoopOverTrees(input_dir                 = samples_path,
-                                variables                 = variables,
-                                weight                    = parameters.weights,
-                                list_sample               = DY_list,
-                                cut                       = parameters.cut,
-                                xsec_json                 = parameters.xsec,
-                                event_weight_sum_json     = parameters.event_weight_sum,
-                                tag                       = 'DY')
-        logging.info('DY sample size : {}'.format(data_DY.shape[0]))
-        data_TT = LoopOverTrees(input_dir                 = samples_path,
-                                variables                 = variables,
-                                weight                    = parameters.weights,
-                                list_sample               = TT_list,
-                                cut                       = parameters.cut,
-                                xsec_json                 = parameters.xsec,
-                                event_weight_sum_json     = parameters.event_weight_sum,
-                                tag                       = 'TT')
-        logging.info('TT sample size : {}'.format(data_TT.shape[0]))
-        data_ZA = LoopOverTrees(input_dir                   = samples_path,
-                                variables                   = variables,
-                                weight                      = parameters.weights,
-                                list_sample                 = ZA_list,
-                                cut                         = parameters.cut,
-                                xsec_json                   = parameters.xsec,
-                                event_weight_sum_json       = parameters.event_weight_sum,
-                                tag                         = 'ZA')
-        logging.info('Signal sample size : {}'.format(data_ZA.shape[0]))
+        nodes = ['TT','DY','ZA']
+        channels = ['ElEl','MuMu']
+        data_dict = {}
+        for node in nodes:
+            list_sample = []
+            if opt.resolved:
+                strSelect = ['resolved_{}_{}'.format(channel,node) for channel in channels]
+            if opt.boosted:
+                strSelect = ['boosted_{}_{}'.format(channel,node) for channel in channels]
 
-        list_inputs  = [var.replace('$','') for var in parameters.inputs]
-        list_outputs = [var.replace('$','') for var in parameters.outputs]
+            data_node = None
+
+            for era,samples_dict in zip(['2016','2017','2018'],[samples_dict_2016,samples_dict_2017,samples_dict_2018]):
+                if len(samples_dict.keys())==0:
+                    logging.info('Sample dict for era {} is empty'.format(era))
+                    continue
+                if node != 'ZA':
+                    xsec_json = parameters.xsec_json.format(era=era)
+                    event_weight_sum_json = parameters.event_weight_sum_json.format(era=era)
+                else:
+                    xsec_json = None
+                    event_weight_sum_json = None
+                list_sample = [sample for key in strSelect for sample in samples_dict[key]]
+                data_node_era = LoopOverTrees(input_dir                 = samples_path,
+                                              variables                 = variables,
+                                              weight                    = parameters.weights,
+                                              list_sample               = list_sample,
+                                              cut                       = parameters.cut,
+                                              xsec_json                 = xsec_json,
+                                              event_weight_sum_json     = event_weight_sum_json,
+                                              luminosity                = lumidict[era],
+                                              additional_columns        = {'tag':node,'era':era})
+                if data_node is None:
+                    data_node = data_node_era
+                else:
+                    data_node = pd.concat([data_node,data_node_era],axis=0)
+                logging.info('{} Sample size for era {} : {}'.format(node,era,data_node_era.shape[0]))
+            data_dict[node] = data_node
+            logging.info('{} Sample size for all eras : {}'.format(node,data_node.shape[0]))
 
         #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
 
         # Modify MA and MH for background #
-        mass_prop_ZA = [(x, len(list(y))) for x, y in itertools.groupby(sorted(data_ZA[["mH","mA"]].values.tolist()))]
-        mass_prop_DY = [(x,math.ceil(y/data_ZA.shape[0]*data_DY.shape[0])) for x,y in mass_prop_ZA]
-        mass_prop_TT = [(x,math.ceil(y/data_ZA.shape[0]*data_TT.shape[0])) for x,y in mass_prop_ZA]
+        mass_prop_ZA = [(x, len(list(y))) for x, y in itertools.groupby(sorted(data_dict['ZA'][["mH","mA"]].values.tolist()))]
+        mass_prop_DY = [(x,math.ceil(y/data_dict['ZA'].shape[0]*data_dict['DY'].shape[0])) for x,y in mass_prop_ZA]
+        mass_prop_TT = [(x,math.ceil(y/data_dict['ZA'].shape[0]*data_dict['TT'].shape[0])) for x,y in mass_prop_ZA]
             # array of [(mH,mA), proportions]
         mass_DY = np.array(reduce(operator.concat, [[m]*n for (m,n) in mass_prop_DY]))
         mass_TT = np.array(reduce(operator.concat, [[m]*n for (m,n) in mass_prop_TT]))
@@ -303,10 +302,10 @@ def main():
         np.random.shuffle(mass_TT) # Shuffle so that each background event has random masses
         df_masses_DY = pd.DataFrame(mass_DY,columns=["mH","mA"]) 
         df_masses_TT = pd.DataFrame(mass_TT,columns=["mH","mA"]) 
-        df_masses_DY = df_masses_DY[:data_DY.shape[0] ]# Might have slightly more entries due to numerical instabilities in props
-        df_masses_TT = df_masses_TT[:data_TT.shape[0] ]# Might have slightly more entries due to numerical instabilities in props
-        data_DY[["mH","mA"]] = df_masses_DY
-        data_TT[["mH","mA"]] = df_masses_TT
+        df_masses_DY = df_masses_DY[:data_dict['DY'].shape[0] ]# Might have slightly more entries due to numerical instabilities in props
+        df_masses_TT = df_masses_TT[:data_dict['TT'].shape[0] ]# Might have slightly more entries due to numerical instabilities in props
+        data_dict['DY'][["mH","mA"]] = df_masses_DY
+        data_dict['TT'][["mH","mA"]] = df_masses_TT
 
 
         # Check the proportions #
@@ -314,23 +313,23 @@ def main():
         tot_DY = 0
         tot_TT = 0
         for masses, prop_in_ZA in mass_prop_ZA:
-            prop_in_DY = data_DY[(data_DY["mH"]==masses[0]) & (data_DY["mA"]==masses[1])].shape[0]
-            prop_in_TT = data_TT[(data_TT["mH"]==masses[0]) & (data_TT["mA"]==masses[1])].shape[0]
+            prop_in_DY = data_dict['DY'][(data_dict['DY']["mH"]==masses[0]) & (data_dict['DY']["mA"]==masses[1])].shape[0]
+            prop_in_TT = data_dict['TT'][(data_dict['TT']["mH"]==masses[0]) & (data_dict['TT']["mA"]==masses[1])].shape[0]
             logging.debug("... Mass point (MH = %d, MA = %d)\t: N signal = %d (%0.2f%%),\tN DY = %d (%0.2f%%)\tN TT = %d (%0.2f%%)"
-                         %(masses[0],masses[1],prop_in_ZA,prop_in_ZA/data_ZA.shape[0]*100,prop_in_DY,prop_in_DY/data_DY.shape[0]*100,prop_in_TT,prop_in_TT/data_TT.shape[0]*100))
+                         %(masses[0],masses[1],prop_in_ZA,prop_in_ZA/data_dict['ZA'].shape[0]*100,prop_in_DY,prop_in_DY/data_dict['DY'].shape[0]*100,prop_in_TT,prop_in_TT/data_dict['TT'].shape[0]*100))
             tot_DY += prop_in_DY
             tot_TT += prop_in_TT
-        assert tot_DY == data_DY.shape[0]
-        assert tot_TT == data_TT.shape[0]
+        assert tot_DY == data_dict['DY'].shape[0]
+        assert tot_TT == data_dict['TT'].shape[0]
 
         # Weight equalization #
         if parameters.weights is not None:
-            weight_DY = data_DY["event_weight"]
-            weight_TT = data_TT["event_weight"]
+            weight_DY = data_dict['DY']["event_weight"]
+            weight_TT = data_dict['TT']["event_weight"]
             # Use mass prop weights so that eahc mass point has same importance #
-            weight_ZA = np.zeros(data_ZA.shape[0])
+            weight_ZA = np.zeros(data_dict['ZA'].shape[0])
             for m,p in mass_prop_ZA:    
-                idx = list(data_ZA[(data_ZA["mH"]==m[0]) & (data_ZA["mA"]==m[1])].index)
+                idx = list(data_dict['ZA'][(data_dict['ZA']["mH"]==m[0]) & (data_dict['ZA']["mA"]==m[1])].index)
                 weight_ZA[idx] = 1./p
             # We need the different types to have the same sumf of weight to equalize training
             # Very small weights produce very low loss function, needs to add multiplicating factor
@@ -338,9 +337,9 @@ def main():
             weight_TT = weight_TT/np.sum(weight_TT)*1e5
             weight_ZA = weight_ZA/np.sum(weight_ZA)*1e5
         else:
-            weight_DY = np.ones(data_DY.shape[0])
-            weight_TT = np.ones(data_TT.shape[0])
-            weight_ZA = np.ones(data_ZA.shape[0])
+            weight_DY = np.ones(data_dict['DY'].shape[0])
+            weight_TT = np.ones(data_dict['TT'].shape[0])
+            weight_ZA = np.ones(data_dict['ZA'].shape[0])
 
         # Check sum of weight #
         if np.sum(weight_ZA) != np.sum(weight_TT) or np.sum(weight_ZA) != np.sum(weight_DY) or np.sum(weight_TT) != np.sum(weight_DY):
@@ -349,29 +348,29 @@ def main():
             logging.warning('\tTT : '+str(np.sum(weight_TT)))
             logging.warning('\tZA : '+str(np.sum(weight_ZA)))
 
-        data_DY['learning_weights'] = pd.Series(weight_DY)
-        data_TT['learning_weights'] = pd.Series(weight_TT)
-        data_ZA['learning_weights'] = pd.Series(weight_ZA)
+        data_dict['DY']['learning_weights'] = pd.Series(weight_DY)
+        data_dict['TT']['learning_weights'] = pd.Series(weight_TT)
+        data_dict['ZA']['learning_weights'] = pd.Series(weight_ZA)
         #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
 
         # Data splitting #
-        mask_DY = GenerateMask(data_DY.shape[0],parameters.suffix+'_DY')
-        mask_TT = GenerateMask(data_TT.shape[0],parameters.suffix+'_TT')
-        mask_ZA = GenerateMask(data_ZA.shape[0],parameters.suffix+'_ZA')
+        mask_DY = GenerateMask(data_dict['DY'].shape[0],parameters.suffix+'_DY')
+        mask_TT = GenerateMask(data_dict['TT'].shape[0],parameters.suffix+'_TT')
+        mask_ZA = GenerateMask(data_dict['ZA'].shape[0],parameters.suffix+'_ZA')
            # Needs to keep the same testing set for the evaluation of model that was selected earlier
         try:
-            train_DY = data_DY[mask_DY==True]
-            train_TT = data_TT[mask_TT==True]
-            train_ZA = data_ZA[mask_ZA==True]
-            test_DY = data_DY[mask_DY==False]
-            test_TT = data_TT[mask_TT==False]
-            test_ZA = data_ZA[mask_ZA==False]
+            train_DY = data_dict['DY'][mask_DY==True]
+            train_TT = data_dict['TT'][mask_TT==True]
+            train_ZA = data_dict['ZA'][mask_ZA==True]
+            test_DY = data_dict['DY'][mask_DY==False]
+            test_TT = data_dict['TT'][mask_TT==False]
+            test_ZA = data_dict['ZA'][mask_ZA==False]
         except ValueError:
             logging.critical("Problem with the mask you imported, has the data changed since it was generated ?")
             raise ValueError
             
         #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
-        del data_TT , data_DY, data_ZA
+        del data_dict
 
         
         train_all = pd.concat([train_DY,train_TT,train_ZA],copy=True).reset_index(drop=True)
@@ -406,15 +405,17 @@ def main():
         # The preprocessing will be implemented in the network with a custom layer
         if opt.scan!='': # If we don't scan we don't need to scale the data
             MakeScaler(train_all,list_inputs) 
+
+        if not opt.nocache:
+            train_all.to_pickle(parameters.train_cache)
+            test_all.to_pickle(parameters.test_cache)
+            logging.info('Data saved to cache')
      
-        logging.info("Sample size seen by network : %d"%train_all.shape[0])
-        logging.info("Sample size for the output  : %d"%test_all.shape[0])
-        #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
-    else:
-        logging.info('No samples have been imported since you asked for a generator')
-        train_all = pd.DataFrame()
-        test_all = pd.DataFrame()
-        MakeScaler(generator=True, list_inputs=list_inputs)
+    list_inputs  = [var.replace('$','') for var in parameters.inputs]
+    list_outputs = [var.replace('$','') for var in parameters.outputs]
+    logging.info("Sample size seen by network : %d"%train_all.shape[0])
+    logging.info("Sample size for the output  : %d"%test_all.shape[0])
+    #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
 
     #############################################################################################
     # DNN #
