@@ -13,9 +13,9 @@ from keras.regularizers import l1,l2
 
 ##################################  Path variables ####################################
 
-main_path = '/home/ucl/cp3/fbury/bamboodev/ZA_RunIIFullAnalysis/ZAMachineLearning'
-path_out = '/nfs/scratch/fynu/fbury/ZAMachineLearning_output/NNOutput/' 
-path_model = '/home/ucl/cp3/fbury/bamboodev/ZA_RunIIFullAnalysis/ZAMachineLearning/model'
+main_path = os.path.abspath(os.path.dirname(__file__))
+path_out = os.path.abspath('~/scratch/ZAMachineLearning_output')
+path_model = os.path.join(main_path,'model')
 
 ##############################  Datasets proportion   #################################
 # Total must be 1 #
@@ -49,30 +49,25 @@ suffix = 'resolved_and_boosted'
     # scaler_name -> 'scaler_{suffix}.pkl'  If does not exist will be created 
     # mask_name -> 'mask_{suffix}_{sample}.npy'  If does not exist will be created 
 
-xsec = "/home/ucl/cp3/fbury/bamboodev/ZA_RunIIFullAnalysis/ZAMachineLearning/xsec.json"
-event_weight_sum = "/home/ucl/cp3/fbury/bamboodev/ZA_RunIIFullAnalysis/ZAMachineLearning/event_weight_sum.json"
+# Data cache #                                                                                       
+train_cache = os.path.join(path_out,'train_cache.pkl' )
+test_cache = os.path.join(path_out,'test_cache.pkl' )
+
+# Meta config info #
+xsec_json = os.path.join(main_path,'background_{era}_xsec.json')
+event_weight_sum_json = os.path.join(main_path,'background_{era}_event_weight_sum.json')
 
 # Training resume #
-resume_model = ''  # Will only be used if set in the arguments of the script
-
-################################## Generator part ####################################
-# Generator #
-path_gen_training = '' # For training
-path_gen_validation = '' # For val_loss during training
-path_gen_evaluation = '' # for model evaluation
-path_gen_output = '' # for output
-
-workers = 20 # Only for generator part
+resume_model = ''
 
 # Output #
-output_batch_size = 500 
+output_batch_size = 512
 split_name = 'tag' # 'sample' or 'tag' : criterion for output file splitting
 
 ##############################  Evaluation criterion   ################################
 
 eval_criterion = "eval_error" # either val_loss or eval_error
     
-
 ##############################  Model callbacks ################################
 # Early stopping to stop learning after some criterion 
 early_stopping_params = {'monitor'   : 'val_loss',  # Value to monitor
