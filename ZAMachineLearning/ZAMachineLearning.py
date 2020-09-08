@@ -188,8 +188,6 @@ def main():
     if opt.csv!='':
         logging.info('Concatenating csv files from : %s'%(opt.csv))
         dict_csv = ConcatenateCSV(opt.csv)
-        dict_csv.Concatenate()
-        dict_csv.WriteToFile()
 
         sys.exit()
 
