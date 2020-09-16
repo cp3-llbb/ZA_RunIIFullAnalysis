@@ -80,5 +80,5 @@ def MakeScaler(data=None,list_inputs=[],generator=False,batch=100000):
             raise ValueError
         if abs(mean_scale)>0.01 or abs((var_scale-1)/var_scale)>0.01: # Check that scaling is correct to 1%
             logging.critical("Something is wrong with scaler '%s' (mean = %0.6f, var = %0.6f), maybe you loaded an incorrect scaler"%(scaler_name,mean_scale,var_scale))
-            raise RunTimeError
+            raise RuntimeError
 

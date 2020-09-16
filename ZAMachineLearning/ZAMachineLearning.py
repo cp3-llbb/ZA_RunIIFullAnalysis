@@ -86,6 +86,8 @@ def get_options():
     f = parser.add_argument_group('Additional arguments')
     f.add_argument('-v','--verbose', action='store_true', required=False, default=False,
         help='Show DEGUG logging')
+    f.add_argument('--nocache', action='store_true', required=False, default=False,
+        help='Will not use the cache and will not save it')
     f.add_argument('--GPU', action='store_true', required=False, default=False,
         help='GPU requires to execute some commandes before')
 
@@ -136,7 +138,7 @@ def main():
     from generate_mask import GenerateMask
     from split_training import DictSplit
     from concatenate_csv import ConcatenateCSV
-    from sampleList import samples_dict, samples_path
+    from sampleList import samples_dict_2016, samples_dict_2017, samples_dict_2018, samples_path
     from threadGPU import utilizationGPU
     import parameters
 
@@ -241,21 +243,26 @@ def main():
 
     if opt.nocache:
         logging.warning('No cache will be used not saved')
-    if os.path.exists(parameters.train_cache) and os.path.exists(parameters.test_cache) and not opt.nocache:
-        logging.info('Will load data from cache')
+    if os.path.exists(parameters.train_cache) and not opt.nocache:
+        logging.info('Will load training data from cache')
+        logging.info('... Training set : %s'%parameters.train_cache)
         train_all = pd.read_pickle(parameters.train_cache)
-        test_all = pd.read_pickle(parameters.test_cache)
+        if os.path.exists(parameters.test_cache) and not opt.nocache and not parameters.crossvalidation:
+            logging.info('Will load testing data from cache')
+            logging.info('... Testing  set : %s'%parameters.test_cache)
+            test_all = pd.read_pickle(parameters.test_cache)
     else:
         # Import arrays #
         nodes = ['TT','DY','ZA']
         channels = ['ElEl','MuMu']
         data_dict = {}
+        strSelect = []
         for node in nodes:
             list_sample = []
             if opt.resolved:
-                strSelect = ['resolved_{}_{}'.format(channel,node) for channel in channels]
+                strSelect.extend(['resolved_{}_{}'.format(channel,node) for channel in channels])
             if opt.boosted:
-                strSelect = ['boosted_{}_{}'.format(channel,node) for channel in channels]
+                strSelect.extend(['boosted_{}_{}'.format(channel,node) for channel in channels])
 
             data_node = None
 
@@ -352,28 +359,36 @@ def main():
         #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
 
         # Data splitting #
-        mask_DY = GenerateMask(data_dict['DY'].shape[0],parameters.suffix+'_DY')
-        mask_TT = GenerateMask(data_dict['TT'].shape[0],parameters.suffix+'_TT')
-        mask_ZA = GenerateMask(data_dict['ZA'].shape[0],parameters.suffix+'_ZA')
-           # Needs to keep the same testing set for the evaluation of model that was selected earlier
-        try:
-            train_DY = data_dict['DY'][mask_DY==True]
-            train_TT = data_dict['TT'][mask_TT==True]
-            train_ZA = data_dict['ZA'][mask_ZA==True]
-            test_DY = data_dict['DY'][mask_DY==False]
-            test_TT = data_dict['TT'][mask_TT==False]
-            test_ZA = data_dict['ZA'][mask_ZA==False]
-        except ValueError:
-            logging.critical("Problem with the mask you imported, has the data changed since it was generated ?")
-            raise ValueError
-            
-        #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
-        del data_dict
+        train_dict = {}
+        test_dict = {}
+        for node,data in data_dict.items():
+            if parameters.crossvalidation: # Cross-validation
+                if parameters.splitbranch not in data.columns:
+                    raise RuntimeError('Asked for cross validation mask but cannot find the slicing array')
+                try:
+                    data['mask'] = (data[parameters.splitbranch] % parameters.N_slices).to_numpy()
+                    # Will contain numbers : 0,1,2,...N_slices-1
+                except ValueError:
+                    logging.critical("Problem with the masking")
+                    raise ValueError
+            else: # Classic separation
+                mask = GenerateMask(data.shape[0],parameters.suffix+'_'+node)
+                try:
+                    train_dict[node] = data[mask==True]
+                    test_dict[node]  = data[mask==False]
+                except ValueError:
+                    logging.critical("Problem with the mask you imported, has the data changed since it was generated ?")
+                    raise ValueError
 
-        
-        train_all = pd.concat([train_DY,train_TT,train_ZA],copy=True).reset_index(drop=True)
-        test_all = pd.concat([test_DY,test_TT,test_ZA],copy=True).reset_index(drop=True)
-        del train_TT, train_DY, train_ZA, test_TT, test_DY, test_ZA
+        if parameters.crossvalidation:
+            train_all = pd.concat(data_dict.values(),copy=True).reset_index(drop=True)
+            test_all = pd.DataFrame(columns=train_all.columns) # Empty to not break rest of script
+        else:
+            train_all = pd.concat(train_dict.values(),copy=True).reset_index(drop=True)
+            test_all  = pd.concat(test_dict.values(),copy=True).reset_index(drop=True)
+        del data_dict 
+        if not parameters.crossvalidation:
+            del train_dict, test_dict
         #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
 
         # Randomize order, we don't want only one type per batch #
@@ -387,16 +402,20 @@ def main():
         label_encoder.fit(train_all['tag'])
         # From strings to labels #
         train_integers = label_encoder.transform(train_all['tag']).reshape(-1, 1)
-        test_integers = label_encoder.transform(test_all['tag']).reshape(-1, 1)
+        if not parameters.crossvalidation:
+            test_integers = label_encoder.transform(test_all['tag']).reshape(-1, 1)
         # From labels to strings #
         train_onehot = onehot_encoder.fit_transform(train_integers)
-        test_onehot = onehot_encoder.fit_transform(test_integers)
+        if not parameters.crossvalidation:
+            test_onehot = onehot_encoder.fit_transform(test_integers)
         # From arrays to pd DF #
         train_cat = pd.DataFrame(train_onehot,columns=label_encoder.classes_,index=train_all.index)
-        test_cat = pd.DataFrame(test_onehot,columns=label_encoder.classes_,index=test_all.index)
+        if not parameters.crossvalidation:
+            test_cat = pd.DataFrame(test_onehot,columns=label_encoder.classes_,index=test_all.index)
         # Add to full #
         train_all = pd.concat([train_all,train_cat],axis=1)
-        test_all = pd.concat([test_all,test_cat],axis=1)
+        if not parameters.crossvalidation:
+            test_all = pd.concat([test_all,test_cat],axis=1)
 
         # Preprocessing #
         # The purpose is to create a scaler object and save it
@@ -404,19 +423,35 @@ def main():
         if opt.scan!='': # If we don't scan we don't need to scale the data
             MakeScaler(train_all,list_inputs) 
 
+        # Caching #
         if not opt.nocache:
             train_all.to_pickle(parameters.train_cache)
-            test_all.to_pickle(parameters.test_cache)
             logging.info('Data saved to cache')
+            logging.info('... Training set : %s'%parameters.train_cache)
+            if not parameters.crossvalidation:
+                test_all.to_pickle(parameters.test_cache)
+                logging.info('... Testing  set : %s'%parameters.test_cache)
      
     list_inputs  = [var.replace('$','') for var in parameters.inputs]
     list_outputs = [var.replace('$','') for var in parameters.outputs]
     logging.info("Sample size seen by network : %d"%train_all.shape[0])
-    logging.info("Sample size for the output  : %d"%test_all.shape[0])
     #logging.info('Current memory usage : %0.3f GB'%(pid.memory_info().rss/(1024**3)))
+    if parameters.crossvalidation: 
+        N = train_all.shape[0]
+        logging.info('Cross-validation has been requested on set of %d events'%N)
+        for i in range(parameters.N_models):
+            slices_apply , slices_eval, slices_train = GenerateSliceIndices(i)
+            logging.info('... Model %d :'%i)
+            for slicename, slices in zip (['Applied','Evaluated','Trained'],[slices_apply , slices_eval, slices_train]):
+                selector = np.full((train_all.shape[0]), False, dtype=bool)
+                selector = GenerateSliceMask(slices,train_all['mask'])
+                n = train_all[selector].shape[0]
+                logging.info('     %10s on %10d [%3.2f%%] events'%(slicename,n,n*100/N)+' (With mask indices : ['+','.join([str(s) for s in slices])+'])')
+    else:
+        logging.info("Sample size for the output  : %d"%test_all.shape[0])
 
     #############################################################################################
-    # DNN #
+        # DNN #
     #############################################################################################
     if opt.GPU:
         # Start the GPU monitoring thread #
@@ -427,37 +462,53 @@ def main():
 
     if opt.scan != '':
         instance = HyperModel(opt.scan)
-        instance.HyperScan(data=train_all,
-                           list_inputs=list_inputs,
-                           list_outputs=list_outputs,
-                           task=opt.task,
-                           generator=opt.generator,
-                           resume=opt.resume)
-        instance.HyperDeploy(best='eval_error')
+        if parameters.crossvalidation:
+            for i in range(parameters.N_models):
+                logging.info("*"*80)
+                logging.info("Starting training of model %d"%i)
+                instance.HyperScan(data=train_all,
+                                   list_inputs=list_inputs,
+                                   list_outputs=list_outputs,
+                                   task=opt.task,
+                                   model_idx=i)
+                instance.HyperDeploy(best='eval_error')
+        else:
+            instance.HyperScan(data=train_all,
+                               list_inputs=list_inputs,
+                               list_outputs=list_outputs,
+                               task=opt.task,
+                               generator=opt.generator,
+                               resume=opt.resume)
+            instance.HyperDeploy(best='eval_error')
 
     if opt.GPU:
         # Closing monitor thread #
         thread.stopLoop()
         thread.join()
         
-    if opt.model!='': 
+    if len(opt.model) != 0: 
         # Make path #
         output_name = "test" 
-        path_output = os.path.join(parameters.path_out,opt.model,output_name)
+        model_name = opt.model[0][:-1]
+        path_output = os.path.join(parameters.path_out,model_name,output_name)
         if not os.path.exists(path_output):
             os.makedirs(path_output)
 
         # Instance of output class #
-        inst_out = ProduceOutput(model=os.path.join(parameters.main_path,'model',opt.model),
+        inst_out = ProduceOutput(model=[os.path.join(parameters.main_path,'model',model) for model in opt.model],
                                  generator=opt.generator,
                                  list_inputs=list_inputs)
 
         # Use it on test samples #
         if opt.test:
             logging.info('  Processing test output sample  '.center(80,'*'))
-            inst_out.OutputFromTraining(data=test_all,path_output=path_output)
+            if parameters.crossvalidation: # in cross validation the testing set in inside the training DF
+                inst_out.OutputFromTraining(data=train_all,path_output=path_output)
+            else:
+                inst_out.OutputFromTraining(data=test_all,path_output=path_output)
             logging.info('')
              
+
    
 if __name__ == "__main__":
     main()

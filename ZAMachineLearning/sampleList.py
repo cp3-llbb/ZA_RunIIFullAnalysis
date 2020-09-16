@@ -198,7 +198,7 @@ samples_dict_2016["boosted_ElEl_Other"] = [
 "backgrounds/2Lep2bJets_boosted_elel_deepcsvM/results/ZZTo2L2Nu.root",
 "backgrounds/2Lep2bJets_boosted_elel_deepcsvM/results/ZZTo2L2Q.root",
 "backgrounds/2Lep2bJets_boosted_elel_deepcsvM/results/ZZTo4L.root",
-"backgrounds/2Lep2bJets_boosted_elel_deepcsvM/results/ZZZ.root",
+"backgrounds/2Lep2bJets_boosted_elel_deepcsvM/results/ZZZ.root"]
 
 samples_dict_2016["boosted_MuMu_Other"] = [
 "backgrounds/2Lep2bJets_boosted_mumu_deepcsvM/results/ggZH_HToBB_ZToLL.root",
